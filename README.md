@@ -1,141 +1,127 @@
-cron
-====
+# Cron
 
-A cron library for Go.  See the
-[godoc](http://go.pkgdoc.org/github.com/robfig/cron).
+[English](README_EN.md) | 中文
 
-## Usage
+一个用于 Go 语言的 cron 定时任务库。
 
-Callers may register Funcs to be invoked on a given schedule.  Cron will run
-them in their own goroutines. A name must be provided.
+## 安装
+
+```bash
+go get github.com/gocronx-team/cron
+```
+
+## 使用方法
+
+调用者可以注册函数在指定的时间计划上执行。Cron 会在独立的 goroutine 中运行这些函数。必须为每个任务提供一个名称。
 
 ```go
 c := cron.New()
-c.AddFunc("0 5 * * * *",  func() { fmt.Println("Every 5 minutes") }, "Often")
-c.AddFunc("@hourly",      func() { fmt.Println("Every hour") }, "Frequent")
-c.AddFunc("@every 1h30m", func() { fmt.Println("Every hour thirty") }, "Less Frequent")
+c.AddFunc("0 5 * * * *",  func() { fmt.Println("每5分钟执行一次") }, "频繁任务")
+c.AddFunc("@hourly",      func() { fmt.Println("每小时执行一次") }, "小时任务")
+c.AddFunc("@every 1h30m", func() { fmt.Println("每1小时30分钟执行一次") }, "定期任务")
 c.Start()
 ..
-// Funcs are invoked in their own goroutine, asynchronously.
+// 函数在独立的 goroutine 中异步执行
 ...
-// Funcs may also be added to a running Cron
-c.AddFunc("@daily", func() { fmt.Println("Every day") }, "My Job")
+// 也可以向正在运行的 Cron 添加函数
+c.AddFunc("@daily", func() { fmt.Println("每天执行一次") }, "我的任务")
 ..
-// Inspect the cron job entries' next and previous run times.
+// 检查 cron 任务条目的下次和上次运行时间
 inspect(c.Entries())
 ..
-// Remove an entry from the cron by name.
-c.RemoveJob("My Job")
+// 通过名称从 cron 中移除条目
+c.RemoveJob("我的任务")
 ..
-c.Stop()  // Stop the scheduler (does not stop any jobs already running).
+c.Stop()  // 停止调度器（不会停止已经在运行的任务）
 ```
 
-## CRON Expression
+## CRON 表达式
 
-This section describes the specific format accepted by this cron.  Some snippets
-are taken from [the wikipedia article](http://en.wikipedia.org/wiki/Cron).
+本节描述此 cron 库接受的特定格式。部分内容摘自 [维基百科文章](http://en.wikipedia.org/wiki/Cron)。
 
-### Format
+### 格式
 
-A cron expression represents a set of times, using 6 space-separated fields.
+cron 表达式表示一组时间，使用 6 个空格分隔的字段。
 
-Field name | Mandatory? | Allowed values | Allowed special characters
+字段名称 | 必需？ | 允许的值 | 允许的特殊字符
 ---------- | ---------- | -------------- | --------------------------
-Seconds | Yes 	| 0-59 | * / , -
-Minutes | Yes 	| 0-59 | * / , -
-Hours 	| Yes 	| 0-23 | * / , -
-Day of month | Yes | 1-31 | * / , - ?
-Month 	| Yes 	| 1-12 or JAN-DEC | * / , -
-Day of week | Yes | 0-6 or SUN-SAT | * / , - ?
+秒 | 是 | 0-59 | * / , -
+分钟 | 是 | 0-59 | * / , -
+小时 | 是 | 0-23 | * / , -
+日期 | 是 | 1-31 | * / , - ?
+月份 | 是 | 1-12 或 JAN-DEC | * / , -
+星期 | 是 | 0-6 或 SUN-SAT | * / , - ?
 
-Note: Month and Day-of-week field values are case insensitive.  "SUN", "Sun",
-and "sun" are equally accepted.
+注意：月份和星期字段值不区分大小写。"SUN"、"Sun" 和 "sun" 都是可接受的。
 
-### Special Characters
+### 特殊字符
 
-#### Asterisk ( * )
+#### 星号 ( * )
 
-The asterisk indicates that the cron expression will match for all values of the
-field; e.g., using an asterisk in the 5th field (month) would indicate every
-month.
+星号表示 cron 表达式将匹配该字段的所有值；例如，在第5个字段（月份）中使用星号表示每个月。
 
-#### Slash ( / )
+#### 斜杠 ( / )
 
-Slashes are used to describe increments of ranges. For example 3-59/15 in the
-1st field (minutes) would indicate the 3rd minute of the hour and every 15
-minutes thereafter. The form "*/..." is equivalent to the form "first-last/...",
-that is, an increment over the largest possible range of the field.  The form
-"N/..." is accepted as meaning "N-MAX/...", that is, starting at N, use the
-increment until the end of that specific range.  It does not wrap around.
+斜杠用于描述范围的增量。例如，在第1个字段（分钟）中使用 3-59/15 表示该小时的第3分钟以及此后每15分钟。形式 "*/..." 等同于形式 "first-last/..."，即在该字段的最大可能范围内的增量。形式 "N/..." 被接受为 "N-MAX/..." 的意思，即从 N 开始，使用增量直到该特定范围的结束。它不会循环。
 
-#### Comma ( , )
+#### 逗号 ( , )
 
-Commas are used to separate items of a list. For example, using "MON,WED,FRI" in
-the 5th field (day of week) would mean Mondays, Wednesdays and Fridays.
+逗号用于分隔列表项。例如，在第5个字段（星期）中使用 "MON,WED,FRI" 表示星期一、星期三和星期五。
 
-#### Hyphen ( - )
+#### 连字符 ( - )
 
-Hyphens are used to define ranges. For example, 9-17 would indicate every
-hour between 9am and 5pm inclusive.
+连字符用于定义范围。例如，9-17 表示上午9点到下午5点之间的每个小时（包括边界）。
 
-#### Question mark ( ? )
+#### 问号 ( ? )
 
-Question mark may be used instead of '*' for leaving either day-of-month or
-day-of-week blank.
+问号可以用来代替 '*'，用于将日期或星期字段留空。
 
-### Predefined schedules
+### 预定义计划
 
-You may use one of several pre-defined schedules in place of a cron expression.
+您可以使用几个预定义的计划来代替 cron 表达式。
 
-Entry | Description | Equivalent To
+条目 | 描述 | 等同于
 ----- | ----------- | -------------
-@yearly (or @annually) | Run once a year, midnight, Jan. 1st | <code>0 0 0 1 1 *</code>
-@monthly | Run once a month, midnight, first of month | <code>0 0 0 1 * *</code>
-@weekly | Run once a week, midnight on Sunday | <code>0 0 0 * * 0</code>
-@daily (or @midnight) | Run once a day, midnight | <code>0 0 0 * * *</code>
-@hourly | Run once an hour, beginning of hour | <code>0 0 * * * *</code>
+@yearly (或 @annually) | 每年运行一次，1月1日午夜 | <code>0 0 0 1 1 *</code>
+@monthly | 每月运行一次，月初午夜 | <code>0 0 0 1 * *</code>
+@weekly | 每周运行一次，星期日午夜 | <code>0 0 0 * * 0</code>
+@daily (或 @midnight) | 每天运行一次，午夜 | <code>0 0 0 * * *</code>
+@hourly | 每小时运行一次，整点开始 | <code>0 0 * * * *</code>
 
-## Intervals
+## 间隔
 
-You may also schedule a job to execute at fixed intervals.  This is supported by
-formatting the cron spec like this:
+您也可以安排任务以固定间隔执行。通过以下格式的 cron 规范支持：
 
     @every <duration>
 
-where `<duration>` is a string accepted by
-[`time.ParseDuration`](http://golang.org/pkg/time/#ParseDuration).
+其中 `<duration>` 是 [`time.ParseDuration`](http://golang.org/pkg/time/#ParseDuration) 接受的字符串。
 
-For example, `@every 1h30m10s` would indicate a schedule that activates every 
-1 hour, 30 minutes, 10 seconds.
+例如，`@every 1h30m10s` 表示每1小时30分钟10秒激活一次的计划。
 
-> Note: The interval does not take the job runtime into account.  For example,
-> if a job takes *3 minutes* to run, and it is scheduled to run every *5 minutes*,
-> it will have only *2 minutes* of idle time between each run.
+> 注意：间隔不考虑任务运行时间。例如，如果一个任务需要 *3分钟* 运行，并且计划每 *5分钟* 运行一次，那么每次运行之间只有 *2分钟* 的空闲时间。
 
-## Time zones
+## 时区
 
-All interpretation and scheduling is done in the machine's local time zone (as
-provided by the [Go time package](http://www.golang.org/pkg/time)).
+所有解释和调度都在机器的本地时区中完成（由 [Go time 包](http://www.golang.org/pkg/time) 提供）。
 
-Be aware that jobs scheduled during daylight-savings leap-ahead transitions will
-not be run!
+请注意，在夏令时跳跃转换期间安排的任务将不会运行！
 
-## Thread safety
+## 线程安全
 
-Since the Cron service runs concurrently with the calling code, some amount of
-care must be taken to ensure proper synchronization.
+由于 Cron 服务与调用代码并发运行，必须注意确保适当的同步。
 
-All [cron methods](http://go.pkgdoc.org/github.com/robfig/cron#Cron) are
-designed to be correctly synchronized as long as the caller ensures that
-invocations have a clear happens-before ordering between them.
+所有 [cron 方法](http://go.pkgdoc.org/github.com/robfig/cron#Cron) 都设计为正确同步，只要调用者确保调用之间有明确的先行发生排序。
 
-## Implementation
+## 实现
 
-Cron entries are stored in an array, sorted by their next activation time.  Cron
-sleeps until the next job is due to be run.
+Cron 条目存储在数组中，按其下次激活时间排序。Cron 休眠直到下一个任务应该运行。
 
-Upon waking:
-* it runs each entry that is active on that second
-* it calculates the next run times for the jobs that were run
-* it re-sorts the array of entries by next activation time.
-* it goes to sleep until the soonest job.
+唤醒时：
+* 运行在该秒激活的每个条目
+* 计算已运行任务的下次运行时间
+* 按下次激活时间重新排序条目数组
+* 休眠直到最早的任务
+
+## 许可证
+
+MIT License

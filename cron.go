@@ -3,7 +3,9 @@
 package cron
 
 import (
+	"errors"
 	"sort"
+	"sync/atomic"
 	"time"
 )
 
@@ -20,6 +22,7 @@ type Cron struct {
 	snapshot   chan entries
 	running    bool
 	workerPool *WorkerPool
+	metrics    *Metrics
 }
 
 // Job is an interface for submitted cron jobs.
@@ -47,11 +50,14 @@ type Entry struct {
 	// been run.
 	Prev time.Time
 
-	// The Job to run.
+	// The Job to run (wrapped with SafeJob).
 	Job Job
 
 	// Unique name to identify the Entry so as to be able to remove it later.
 	Name string
+
+	// OriginalJob stores the unwrapped job for backward compatibility
+	OriginalJob Job
 }
 
 // byTime is a wrapper for sorting the entry array by time
@@ -83,6 +89,7 @@ func New() *Cron {
 		snapshot:   make(chan entries),
 		running:    false,
 		workerPool: NewWorkerPool(0), // No limit by default
+		metrics:    &Metrics{},
 	}
 }
 
@@ -103,25 +110,48 @@ func (c *Cron) AddFunc(spec string, cmd func(), name string) {
 	c.AddJob(spec, FuncJob(cmd), name)
 }
 
-// AddFunc adds a Job to the Cron to be run on the given schedule.
+// AddFuncWithError adds a func to the Cron to be run on the given schedule.
+// Returns error if spec is invalid or name already exists.
+func (c *Cron) AddFuncWithError(spec string, cmd func(), name string) error {
+	return c.AddJobWithError(spec, FuncJob(cmd), name)
+}
+
+// AddJob adds a Job to the Cron to be run on the given schedule.
 func (c *Cron) AddJob(spec string, cmd Job, name string) {
 	c.Schedule(Parse(spec), cmd, name)
 }
 
+// AddJobWithError adds a Job to the Cron to be run on the given schedule.
+// Returns error if spec is invalid or name already exists.
+func (c *Cron) AddJobWithError(spec string, cmd Job, name string) error {
+	schedule, err := ParseWithError(spec)
+	if err != nil {
+		return err
+	}
+	return c.ScheduleWithError(schedule, cmd, name)
+}
+
 // RemoveJob removes a Job from the Cron based on name.
 func (c *Cron) RemoveJob(name string) {
+	c.RemoveJobWithResult(name)
+}
+
+// RemoveJobWithResult removes a Job from the Cron based on name.
+// Returns true if the job was found and removed, false otherwise.
+func (c *Cron) RemoveJobWithResult(name string) bool {
 	if !c.running {
 		i := c.entries.pos(name)
 
 		if i == -1 {
-			return
+			return false
 		}
 
 		c.entries = c.entries[:i+copy(c.entries[i:], c.entries[i+1:])]
-		return
+		return true
 	}
 
 	c.remove <- name
+	return true // Assume success for running cron
 }
 
 func (entrySlice entries) pos(name string) int {
@@ -135,22 +165,30 @@ func (entrySlice entries) pos(name string) int {
 
 // Schedule adds a Job to the Cron to be run on the given schedule.
 func (c *Cron) Schedule(schedule Schedule, cmd Job, name string) {
+	c.ScheduleWithError(schedule, cmd, name)
+}
+
+// ScheduleWithError adds a Job to the Cron to be run on the given schedule.
+// Returns error if name already exists.
+func (c *Cron) ScheduleWithError(schedule Schedule, cmd Job, name string) error {
 	entry := &Entry{
-		Schedule: schedule,
-		Job:      wrapJob(cmd, name),
-		Name:     name,
+		Schedule:    schedule,
+		Job:         wrapJobWithMetrics(cmd, name, c.metrics),
+		OriginalJob: cmd,
+		Name:        name,
 	}
 
 	if !c.running {
 		i := c.entries.pos(entry.Name)
 		if i != -1 {
-			return
+			return errors.New("cron: job name already exists")
 		}
 		c.entries = append(c.entries, entry)
-		return
+		return nil
 	}
 
 	c.add <- entry
+	return nil
 }
 
 // Entries returns a snapshot of the cron entries.
@@ -235,8 +273,63 @@ func (c *Cron) run() {
 
 // Stop the cron scheduler.
 func (c *Cron) Stop() {
+	if !c.running {
+		return
+	}
 	c.stop <- struct{}{}
 	c.running = false
+}
+
+// StopWithTimeout stops the cron scheduler with a timeout.
+// Returns error if timeout is exceeded.
+func (c *Cron) StopWithTimeout(timeout time.Duration) error {
+	if !c.running {
+		return nil
+	}
+
+	done := make(chan struct{})
+	go func() {
+		c.stop <- struct{}{}
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		c.running = false
+		return nil
+	case <-time.After(timeout):
+		return errors.New("cron: stop timeout exceeded")
+	}
+}
+
+// StopAndWait stops the cron scheduler and waits for all running jobs to complete.
+// Returns error if timeout is exceeded.
+func (c *Cron) StopAndWait(timeout time.Duration) error {
+	if err := c.StopWithTimeout(timeout); err != nil {
+		return err
+	}
+
+	done := make(chan struct{})
+	go func() {
+		c.workerPool.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-time.After(timeout):
+		return errors.New("cron: wait timeout exceeded")
+	}
+}
+
+// GetMetrics returns the current metrics.
+func (c *Cron) GetMetrics() Metrics {
+	return Metrics{
+		TotalRuns:   atomic.LoadInt64(&c.metrics.TotalRuns),
+		TotalPanics: atomic.LoadInt64(&c.metrics.TotalPanics),
+		ActiveJobs:  atomic.LoadInt32(&c.metrics.ActiveJobs),
+	}
 }
 
 // entrySnapshot returns a copy of the current cron entry list.
@@ -244,11 +337,12 @@ func (c *Cron) entrySnapshot() []*Entry {
 	entries := []*Entry{}
 	for _, e := range c.entries {
 		entries = append(entries, &Entry{
-			Schedule: e.Schedule,
-			Next:     e.Next,
-			Prev:     e.Prev,
-			Job:      e.Job,
-			Name:     e.Name,
+			Schedule:    e.Schedule,
+			Next:        e.Next,
+			Prev:        e.Prev,
+			Job:         e.OriginalJob, // Return original job for backward compatibility
+			OriginalJob: e.OriginalJob,
+			Name:        e.Name,
 		})
 	}
 	return entries
