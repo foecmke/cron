@@ -1,6 +1,7 @@
 package cron
 
 import (
+	"sync/atomic"
 	"time"
 )
 
@@ -13,17 +14,16 @@ type SpecSchedule struct {
 // RebootSchedule runs once at startup and never again.
 type RebootSchedule struct{
 	// runOnce ensures the job only runs once
-	ran bool
+	ran uint32
 }
 
 // Next returns the next time this schedule should run.
 // For RebootSchedule, it returns a time a few seconds in the future for the first run,
 // and a time far in the future (year 2099) for the second run to effectively prevent subsequent runs.
 func (rs *RebootSchedule) Next(t time.Time) time.Time {
-	if !rs.ran {
-		rs.ran = true
-		// First execution: 3 seconds from now
-		return t.Add(3 * time.Second)
+	if atomic.CompareAndSwapUint32(&rs.ran, 0, 1) {
+		// First execution: RebootDelay seconds from now
+		return t.Add(RebootDelay)
 	}
 	// Second execution: far in the future (will effectively never run)
 	return time.Date(2099, 1, 1, 0, 0, 0, 0, t.Location())
@@ -69,6 +69,9 @@ var (
 const (
 	// Set the top bit if a star was included in the expression.
 	starBit = 1 << 63
+
+	// RebootDelay is the delay for reboot schedules
+	RebootDelay = 3 * time.Second
 )
 
 // Next returns the next time this schedule is activated, greater than the given
