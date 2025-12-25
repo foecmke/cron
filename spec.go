@@ -10,6 +10,25 @@ type SpecSchedule struct {
 	Second, Minute, Hour, Dom, Month, Dow uint64
 }
 
+// RebootSchedule runs once at startup and never again.
+type RebootSchedule struct{
+	// runOnce ensures the job only runs once
+	ran bool
+}
+
+// Next returns the next time this schedule should run.
+// For RebootSchedule, it returns a time a few seconds in the future for the first run,
+// and a time far in the future (year 2099) for the second run to effectively prevent subsequent runs.
+func (rs *RebootSchedule) Next(t time.Time) time.Time {
+	if !rs.ran {
+		rs.ran = true
+		// First execution: 3 seconds from now
+		return t.Add(3 * time.Second)
+	}
+	// Second execution: far in the future (will effectively never run)
+	return time.Date(2099, 1, 1, 0, 0, 0, 0, t.Location())
+}
+
 // bounds provides a range of acceptable values (plus a map of name to value).
 type bounds struct {
 	min, max uint
