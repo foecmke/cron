@@ -1,3 +1,3 @@
-module github.com/gocronx-team/cron
+module github.com/foecmke/cron
 
 go 1.18
